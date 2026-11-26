@@ -1,0 +1,21 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+
+# 8 MB flash, custom partition table with a 3 MB factory app
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# 8 MB octal PSRAM (N8R8); frame buffers live here
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Console and frame protocol share UART0 (GPIO43/44, wired to the onboard CH343).
+# UART_DEFAULT fixes the console to UART0 at 115200; no USB-Serial-JTAG mirror.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# Protocol and console share UART0; keep routine logs off the wire during frames.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
