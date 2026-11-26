@@ -33,6 +33,33 @@ def wait_ready(ser, timeout_s=20):
     sys.exit("Board never replied READY. Is the test firmware flashed?")
 
 
+def read_jpeg(ser, timeout_s=5):
+    """Read JPEG <len>, payload, and END. Skip leftover READY/test lines first."""
+    ser.timeout = timeout_s
+    deadline = time.time() + timeout_s
+    header = ""
+    while time.time() < deadline:
+        header = ser.readline().decode(errors="replace").strip()
+        if header.startswith("JPEG "):
+            break
+        if header:
+            print(f"  skip: {header}")
+    else:
+        sys.exit(f"No JPEG header before timeout (last line: {header!r})")
+
+    size = int(header.split()[1])
+    data = ser.read(size)
+    if len(data) != size:
+        sys.exit(f"Short read: got {len(data)} of {size} bytes")
+    if data[:2] != b"\xff\xd8" or data[-2:] != b"\xff\xd9":
+        sys.exit("Data is not a complete JPEG (SOI/EOI markers missing)")
+
+    trailer = ser.readline().decode(errors="replace").strip()
+    if trailer != "END":
+        sys.exit(f"Expected END after payload, got {trailer!r}")
+    return data
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port")
@@ -51,21 +78,11 @@ def main():
     ser.reset_input_buffer()
     ser.write(b"c")
 
-    ser.timeout = 5
-    header = ser.readline().decode(errors="replace").strip()
-    if not header.startswith("JPEG "):
-        sys.exit(f"Unexpected reply: {header!r}")
-    size = int(header.split()[1])
-    data = ser.read(size)
-    if len(data) != size:
-        sys.exit(f"Short read: got {len(data)} of {size} bytes")
-    if data[:2] != b"\xff\xd8":
-        sys.exit("Data is not a JPEG (missing FFD8 start marker)")
-
+    data = read_jpeg(ser)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "wb") as f:
         f.write(data)
-    print(f"Saved {size} bytes to {args.out}")
+    print(f"Saved {len(data)} bytes to {args.out}")
     ser.close()
 
 
