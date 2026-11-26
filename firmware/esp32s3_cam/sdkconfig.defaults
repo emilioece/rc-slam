@@ -17,4 +17,5 @@ CONFIG_SPIRAM_USE_MALLOC=y
 # UART_DEFAULT fixes the console to UART0 at 115200; no USB-Serial-JTAG mirror.
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
-CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+# Protocol and console share UART0; keep routine logs off the wire during frames.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y

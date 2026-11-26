@@ -41,6 +41,7 @@
 #define WARMUP_FRAMES       3
 #define RETRY_MIN_MS        500
 #define RETRY_MAX_MS        8000
+#define FB_GET_FAIL_LIMIT   3
 
 static const char *TAG = "cam";
 
@@ -52,6 +53,7 @@ static struct {
     uint32_t seq;
     esp_err_t last_err;
     uint32_t baud;
+    uint8_t fb_fail_streak;
 } s_cam = { .name = "none", .last_err = ESP_ERR_INVALID_STATE, .baud = PROTO_BOOT_BAUD };
 
 // While set, ESP_LOG output is dropped so it cannot land inside a binary frame.
@@ -77,7 +79,14 @@ static void proto_printf(const char *fmt, ...)
     if (n < 0) {
         return;
     }
-    proto_write(buf, n < (int)sizeof buf ? (size_t)n : sizeof buf - 1);
+    if (n < (int)sizeof buf) {
+        proto_write(buf, (size_t)n);
+        return;
+    }
+    // Truncated: keep the line terminator so the host does not hang waiting for \n.
+    buf[sizeof buf - 2] = '\n';
+    buf[sizeof buf - 1] = '\0';
+    proto_write(buf, sizeof buf - 1);
 }
 
 static esp_err_t camera_start(pixformat_t format)
@@ -160,6 +169,14 @@ static void cmd_info(void)
                  s_cam.ready ? "" : " err=", s_cam.ready ? "" : esp_err_to_name(s_cam.last_err));
 }
 
+static void camera_mark_failed(esp_err_t err)
+{
+    s_cam.last_err = err;
+    s_cam.ready = false;
+    s_cam.fb_fail_streak = 0;
+    esp_camera_deinit();
+}
+
 static void cmd_capture(void)
 {
     if (!s_cam.ready) {
@@ -169,9 +186,15 @@ static void cmd_capture(void)
 
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb == NULL) {
+        s_cam.fb_fail_streak++;
         proto_printf("ERR ESP_ERR_TIMEOUT fb_get\n");
+        if (s_cam.fb_fail_streak >= FB_GET_FAIL_LIMIT) {
+            camera_mark_failed(ESP_ERR_TIMEOUT);
+            proto_printf("ERR ESP_ERR_TIMEOUT camera_recovering\n");
+        }
         return;
     }
+    s_cam.fb_fail_streak = 0;
 
     uint8_t *jpg = fb->buf;
     size_t len = fb->len;
@@ -249,6 +272,7 @@ void app_main(void)
             esp_err_t err = camera_bringup();
             if (err == ESP_OK) {
                 s_cam.ready = true;
+                s_cam.fb_fail_streak = 0;
                 backoff_ms = RETRY_MIN_MS;
                 proto_printf("READY sensor=%s pid=0x%04x jpeg=%s\n",
                              s_cam.name, s_cam.pid, s_cam.hw_jpeg ? "hw" : "sw");
