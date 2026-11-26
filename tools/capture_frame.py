@@ -42,6 +42,16 @@ def open_port(port, baud):
     return ser
 
 
+def drain(ser, seconds=0.15):
+    """Drop leftover bytes so a retry does not treat payload as a new reply."""
+    ser.reset_input_buffer()
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        chunk = ser.read(256)
+        if not chunk:
+            time.sleep(0.01)
+
+
 def read_line(ser, deadline):
     """Return the next non-empty protocol line, skipping log and boot noise."""
     buf = bytearray()
@@ -101,7 +111,7 @@ def connect(port, baud, timeout):
     raise CaptureError(f"no PONG at {baud}; is firmware/esp32s3_cam flashed?")
 
 
-def read_frame(ser, timeout):
+def read_frame_once(ser, timeout):
     header = command(ser, "CAPTURE", "FRAME ", timeout).split()
     if len(header) != 7 or header[4] != "JPEG":
         raise CaptureError(f"malformed header: {' '.join(header)}")
@@ -124,6 +134,16 @@ def read_frame(ser, timeout):
     if data[:2] != b"\xff\xd8" or data[-2:] != b"\xff\xd9":
         raise CaptureError(f"frame {seq} is not a complete JPEG (SOI/EOI markers missing)")
     return seq, width, height, bytes(data)
+
+
+def read_frame(ser, timeout):
+    """Capture one frame; retry once after draining if the first attempt is corrupt."""
+    try:
+        return read_frame_once(ser, timeout)
+    except CaptureError as first:
+        print(f"  retry after: {first}")
+        drain(ser)
+        return read_frame_once(ser, timeout)
 
 
 def main():
