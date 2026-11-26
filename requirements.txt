@@ -1,0 +1,4 @@
+# Host-side tools only (capture scripts under tools/ and test/).
+# Firmware builds use PlatformIO / ESP-IDF, not pip.
+pyserial>=3.5
+Pillow>=10.0.0
