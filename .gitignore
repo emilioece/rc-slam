@@ -1,0 +1,29 @@
+# Local Python environment and secrets
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+
+# Flash dumps and camera captures are large binaries
+backups/
+captures/
+
+# PlatformIO / ESP-IDF build output
+.pio/
+managed_components/
+firmware/esp32s3_cam/sdkconfig.*
+!firmware/esp32s3_cam/sdkconfig.defaults
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
