@@ -1,6 +1,6 @@
 // Single VL53L0X bring-up. At boot it checks the wiring and prints PASS/FAIL per
 // check, then streams distances so they can be compared with a ruler.
-// Pass criterion (Tab 1.md step 3): within 5% of a ruler at 100 mm and 300 mm.
+// Pass criterion: within 5% of a ruler at 100 mm and 300 mm.
 //
 // Serial: 115200 baud on the ST-Link virtual COM port. Send 't' to rerun the checks.
 
@@ -12,11 +12,14 @@ static const uint8_t  PIN_XSHUT       = D10;
 static const uint8_t  TOF_ADDR        = 0x29;
 static const uint8_t  REG_MODEL_ID    = 0xC0;
 static const uint8_t  MODEL_ID        = 0xEE;
+static const uint16_t RANGE_MAX_MM    = 8190;
 static const uint32_t TIMING_BUDGET_US = 33000;
 static const int      AVG_SAMPLES     = 10;
 
 static VL53L0X tof;
 static bool tof_ready = false;
+static uint16_t samples[AVG_SAMPLES];
+static int sample_count = 0;
 
 static void report(const char *name, bool ok, const char *detail)
 {
@@ -46,13 +49,20 @@ static int scan_bus(char *out, size_t out_len)
     return found;
 }
 
-static uint8_t read_reg(uint8_t reg)
+// Returns false on I2C failure so "model ID 0x00" is not confused with a bus error.
+static bool read_reg(uint8_t reg, uint8_t *value)
 {
     Wire.beginTransmission(TOF_ADDR);
     Wire.write(reg);
-    if (Wire.endTransmission(false) != 0) return 0;
-    if (Wire.requestFrom(TOF_ADDR, (uint8_t)1) != 1) return 0;
-    return Wire.read();
+    if (Wire.endTransmission(false) != 0) return false;
+    if (Wire.requestFrom(TOF_ADDR, (uint8_t)1) != 1) return false;
+    *value = Wire.read();
+    return true;
+}
+
+static void reset_stream_buffer(void)
+{
+    sample_count = 0;
 }
 
 static void run_checks(void)
@@ -60,6 +70,7 @@ static void run_checks(void)
     char detail[96];
     char devices[64];
     tof_ready = false;
+    reset_stream_buffer();
 
     Serial.println();
     Serial.println("=== VL53L0X bring-up ===");
@@ -85,9 +96,14 @@ static void run_checks(void)
         return;
     }
 
-    uint8_t id = read_reg(REG_MODEL_ID);
-    bool id_ok = id == MODEL_ID;
-    snprintf(detail, sizeof detail, "model ID 0x%02X, expected 0x%02X", id, MODEL_ID);
+    uint8_t id = 0;
+    bool id_read_ok = read_reg(REG_MODEL_ID, &id);
+    bool id_ok = id_read_ok && id == MODEL_ID;
+    if (!id_read_ok) {
+        snprintf(detail, sizeof detail, "I2C read failed at 0x%02X", TOF_ADDR);
+    } else {
+        snprintf(detail, sizeof detail, "model ID 0x%02X, expected 0x%02X", id, MODEL_ID);
+    }
     report("model id   ", id_ok, detail);
 
     bool init_ok = tof.init();
@@ -102,7 +118,7 @@ static void run_checks(void)
     uint32_t t0 = micros();
     uint16_t mm = tof.readRangeSingleMillimeters();
     uint32_t read_us = micros() - t0;
-    bool read_ok = !tof.timeoutOccurred() && mm < 8190;
+    bool read_ok = !tof.timeoutOccurred() && mm < RANGE_MAX_MM;
     snprintf(detail, sizeof detail, "%u mm in %lu us", mm, (unsigned long)read_us);
     report("first read ", read_ok, detail);
 
@@ -133,17 +149,19 @@ void loop()
     }
     if (!tof_ready) return;
 
-    static uint16_t samples[AVG_SAMPLES];
-    static int count = 0;
-
     uint16_t mm = tof.readRangeContinuousMillimeters();
     if (tof.timeoutOccurred()) {
         Serial.println("timeout");
         return;
     }
-    samples[count++] = mm;
-    if (count < AVG_SAMPLES) return;
-    count = 0;
+    if (mm >= RANGE_MAX_MM) {
+        Serial.printf("out of range (%u)\n", mm);
+        return;
+    }
+
+    samples[sample_count++] = mm;
+    if (sample_count < AVG_SAMPLES) return;
+    sample_count = 0;
 
     uint32_t sum = 0;
     uint16_t lo = 0xFFFF, hi = 0;
